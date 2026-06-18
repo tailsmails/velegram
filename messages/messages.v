@@ -44,10 +44,27 @@ fn build_entities(entities []structs.TextEntityInput) string {
 }
 
 fn to_text_message(msg structs.Message) ?structs.TextMessage {
-	if msg.content.@type != 'messageText' {
+	mut text := ''
+	mut entities := []structs.Entity{}
+
+	if msg.content.@type == 'messageText' {
+		text_data := msg.content.text or { return none }
+		text = text_data.text
+		entities = text_data.entities.clone()
+	} else if msg.content.@type == 'messageContactRegistered' {
+		text = '[Service: joined Telegram]'
+	} else if msg.content.@type == 'messageChatAddMembers' {
+		text = '[Service: added to chat]'
+	} else if msg.content.@type == 'messageChatJoinByLink' {
+		text = '[Service: joined by invite link]'
+	} else if msg.content.@type == 'messagePinMessage' {
+		text = '[Service: pinned a message]'
+	} else if msg.content.@type == 'messageChatDeleteMember' {
+		text = '[Service: left or removed from chat]'
+	} else {
 		return none
 	}
-	text_data := msg.content.text or { return none }
+
 	mut sender_type := ''
 	mut sender_id := i64(0)
 	if msg.sender_id.@type == 'messageSenderUser' {
@@ -68,8 +85,8 @@ fn to_text_message(msg structs.Message) ?structs.TextMessage {
 		sender_id: sender_id
 		is_outgoing: msg.is_outgoing
 		date: msg.date
-		text: text_data.text
-		entities: text_data.entities
+		text: text
+		entities: entities
 		reply_to_id: reply_id
 	}
 }
@@ -477,4 +494,19 @@ pub fn display_link(link structs.MessageLinkResponse) {
 	println('--- link ---')
 	println('${link.link}')
 	println('---')
+}
+
+pub fn add_contact(client voidptr, phone_number string, first_name string, last_name string) {
+	q := '{"@type":"importContacts","contacts":[{"@type":"contact","phone_number":"${escape(phone_number)}","first_name":"${escape(first_name)}","last_name":"${escape(last_name)}"}]}'
+	tdlib.send_query(client, q)
+}
+
+pub fn delete_contact(client voidptr, user_id i64) {
+	q := '{"@type":"removeContacts","user_ids":[${user_id}]}'
+	tdlib.send_query(client, q)
+}
+
+pub fn get_contacts(client voidptr) {
+	q := '{"@type":"getContacts"}'
+	tdlib.send_query(client, q)
 }
