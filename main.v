@@ -7,7 +7,7 @@ import structs
 import messages
 import os
 
-fn on_response(client voidptr, resp_type string, raw string) {
+fn on_response(_client voidptr, resp_type string, raw string) {
 	match resp_type {
 		'messages' {
 			msgs := messages.parse_response(raw)
@@ -56,13 +56,14 @@ fn on_response(client voidptr, resp_type string, raw string) {
 }
 
 fn on_message(client voidptr, msg structs.TextMessage) {
-	if !msg.is_outgoing {
-		println('[${msg.chat_id}] ${msg.sender_type}:${msg.sender_id} > ${msg.text}')
+	if msg.is_outgoing {
 		return
 	}
 
+	println('[${msg.chat_id}] ${msg.sender_type}:${msg.sender_id} > ${msg.text}')
+
 	if msg.text == '/ping' {
-		messages.edit(client, msg.chat_id, msg.id, 'pong')
+		messages.reply(client, msg.chat_id, msg.id, 'pong')
 	}
 	if msg.text == '/delete' {
 		messages.delete_one(client, msg.chat_id, msg.id, true)
@@ -71,7 +72,7 @@ fn on_message(client voidptr, msg structs.TextMessage) {
 		messages.send_silent(client, msg.chat_id, 'silent message')
 	}
 	if msg.text == '/nopreview' {
-		messages.send_no_preview(client, msg.chat_id, 'https://google.com no preview')
+		messages.send_no_preview(client, msg.chat_id, 'https://google.com')
 	}
 	if msg.text == '/typing' {
 		messages.typing(client, msg.chat_id)
@@ -172,6 +173,70 @@ fn on_message(client voidptr, msg structs.TextMessage) {
 	}
 	if msg.text == '/unpinall' {
 		messages.unpin_all(client, msg.chat_id)
+	}
+	if msg.text == '/photo' {
+		messages.send_photo(client, msg.chat_id, 'data/test.jpg', 'caption text')
+	}
+	if msg.text == '/doc' {
+		messages.send_document(client, msg.chat_id, 'data/test.pdf', 'document text')
+	}
+	if msg.text == '/voice' {
+		messages.send_voice(client, msg.chat_id, 'data/test.ogg', 5, 'voice text')
+	}
+	if msg.text == '/video' {
+		messages.send_video(client, msg.chat_id, 'data/test.mp4', 'video text')
+	}
+	if msg.text == '/sticker' {
+		messages.send_sticker(client, msg.chat_id, 'data/test.webp')
+	}
+	if msg.text == '/location' {
+		messages.send_location(client, msg.chat_id, 40.1111, 10.0000)
+	}
+	if msg.text == '/contact' {
+		messages.send_contact(client, msg.chat_id, '+123456789', 'John', 'Doe')
+	}
+	if msg.text == '/venue' {
+		messages.send_venue(client, msg.chat_id, 40.1111, 10.0000, 'Never', 'Land')
+	}
+	if msg.text == '/react' {
+		if msg.reply_to_id > 0 {
+			messages.add_reaction(client, msg.chat_id, msg.reply_to_id, '👍')
+		}
+	}
+	if msg.text == '/unreact' {
+		if msg.reply_to_id > 0 {
+			messages.remove_reaction(client, msg.chat_id, msg.reply_to_id, '👍')
+		}
+	}
+	if msg.text == '/fetch' {
+		if msg.reply_to_id > 0 {
+			res := messages.fetch_message(client, msg.chat_id, msg.reply_to_id)
+			if r := res {
+				messages.send(client, msg.chat_id, 'Fetched: ${r.text}')
+			}
+		}
+	}
+	if msg.text == '/fetchchat' {
+		res := messages.fetch_chat_info(client, msg.chat_id)
+		if r := res {
+			messages.send(client, msg.chat_id, 'Chat Title: ${r.title}')
+		}
+	}
+	if msg.text.starts_with('/createtopic ') {
+		name := msg.text.all_after('/createtopic ')
+		messages.create_topic(client, msg.chat_id, name)
+	}
+	if msg.text.starts_with('/closetopic ') {
+		tid := msg.text.all_after('/closetopic ').i64()
+		messages.close_topic(client, msg.chat_id, tid)
+	}
+	if msg.text.starts_with('/opentopic ') {
+		tid := msg.text.all_after('/opentopic ').i64()
+		messages.open_topic(client, msg.chat_id, tid)
+	}
+	if msg.text.starts_with('/download ') {
+		fid := msg.text.all_after('/download ').int()
+		messages.download_file(client, fid, 1)
 	}
 	if msg.text.starts_with('/history ') {
 		parts := msg.text.all_after('/history ').split(' ')
@@ -294,8 +359,9 @@ fn on_message(client voidptr, msg structs.TextMessage) {
 }
 
 fn main() {
-	api_id := 123456
-	api_hash := 'your_api_hash'
+	api_id := 2040
+	api_hash := 'b18441a1ff607e10a989891a5462e627' // telegram desktop default
+	bot_token := '' // empty if you about to login your tg account
 
 	client := tdlib.new_client() or {
 		eprintln(err)
@@ -305,7 +371,7 @@ fn main() {
 	tdlib.send_query(client, '{"@type":"setLogVerbosityLevel","new_verbosity_level":0}')
 	os.system('clear')
 
-	handlers.run(client, 1.0, api_id, api_hash, on_message, on_response) or { eprintln(err) }
+	handlers.run(client, 1.0, api_id, api_hash, bot_token, on_message, on_response) or { eprintln(err) }
 
 	tdlib.client_destroy(client)
 }
