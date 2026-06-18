@@ -6,22 +6,50 @@ import structs
 import os
 import messages
 
-pub fn run(client voidptr, timeout f64, api_id int, api_hash string, on_message fn (voidptr, structs.TextMessage), on_response fn (voidptr, string, string)) ! {
-	mut chats_loaded := false
+struct BotAuthQuery {
+	@type string @[json: '@type']
+	token string
+}
 
-	for {
+struct PhoneAuthQuery {
+	@type        string @[json: '@type']
+	phone_number string
+}
+
+struct CodeAuthQuery {
+	@type string @[json: '@type']
+	code  string
+}
+
+struct PasswordAuthQuery {
+	@type    string @[json: '@type']
+	password string
+}
+
+pub fn run(client voidptr, timeout f64, api_id int, api_hash string, bot_token string, on_message fn (voidptr, structs.TextMessage), on_response fn (voidptr, string, string)) ! {
+	mut chats_loaded := false
+	mut is_running := true
+
+	for is_running {
 		response := tdlib.receive(client, timeout)
-		rtype := json.decode(structs.Type, response) or { continue }
+		rtype := json.decode(structs.Type, response) or {
+			eprintln('Decoding error: ${err.msg()}')
+			continue
+		}
 
 		match rtype.@type {
 			'updateAuthorizationState' {
 				p := json.decode(structs.AuthorizationQuery, response) or { continue }
-				handle_auth(client, api_id, api_hash, p.authorization_state.@type)
+				handle_auth(client, api_id, api_hash, bot_token, p.authorization_state.@type)
+				
+				if p.authorization_state.@type == 'authorizationStateClosed' {
+					is_running = false
+				}
 			}
 			'updateConnectionState' {
 				conn := json.decode(structs.Connection, response) or { continue }
 				handle_connection(conn.state.@type)
-				if conn.state.@type == 'connectionStateReady' && !chats_loaded {
+				if conn.state.@type == 'connectionStateReady' && !chats_loaded && bot_token == '' {
 					messages.load_chats(client, 100)
 					chats_loaded = true
 				}
@@ -78,13 +106,14 @@ fn handle_connection(state string) {
 	}
 }
 
-fn handle_auth(client voidptr, api_id int, api_hash string, state string) {
+fn handle_auth(client voidptr, api_id int, api_hash string, bot_token string, state string) {
 	match state {
 		'authorizationStateWaitTdlibParameters' {
+			db_path := if bot_token.len > 0 { 'data/bot_data' } else { 'data/user_data' }
 			par := structs.Parameters{
 				use_test_dc: false
-				database_directory: 'data/td_data'
-				files_directory: 'data/td_files'
+				database_directory: db_path
+				files_directory: db_path + '/files'
 				database_encryption_key: ''
 				use_file_database: true
 				use_chat_info_database: true
@@ -102,22 +131,43 @@ fn handle_auth(client voidptr, api_id int, api_hash string, state string) {
 			tdlib.send_query(client, json.encode(par))
 		}
 		'authorizationStateWaitPhoneNumber' {
-			phone := os.input('phone number: ')
-			q := '{"@type":"setAuthenticationPhoneNumber","phone_number":"${phone}"}'
-			tdlib.send_query(client, q)
+			if bot_token.len > 0 {
+				println('logging in as bot...')
+				q := json.encode(BotAuthQuery{
+					@type: 'checkAuthenticationBotToken'
+					token: bot_token
+				})
+				tdlib.send_query(client, q)
+			} else {
+				phone := os.input('phone number: ')
+				q := json.encode(PhoneAuthQuery{
+					@type: 'setAuthenticationPhoneNumber'
+					phone_number: phone
+				})
+				tdlib.send_query(client, q)
+			}
 		}
 		'authorizationStateWaitCode' {
 			code := os.input('auth code: ')
-			q := '{"@type":"checkAuthenticationCode","code":"${code}"}'
+			q := json.encode(CodeAuthQuery{
+				@type: 'checkAuthenticationCode'
+				code: code
+			})
 			tdlib.send_query(client, q)
 		}
 		'authorizationStateWaitPassword' {
 			pass := os.input('2fa password: ')
-			q := '{"@type":"checkAuthenticationPassword","password":"${pass}"}'
+			q := json.encode(PasswordAuthQuery{
+				@type: 'checkAuthenticationPassword'
+				password: pass
+			})
 			tdlib.send_query(client, q)
 		}
 		'authorizationStateReady' {
 			println('logged in.')
+		}
+		'authorizationStateClosed' {
+			println('session closed.')
 		}
 		else {}
 	}
