@@ -129,3 +129,33 @@ pub fn fetch_supergroup_members(client voidptr, chat_id i64, limit int) []struct
 	raw := wait_for(client, 2.0, 'chatMembers', 50) or { return [] }
 	return parse_members(raw)
 }
+
+pub fn fetch_me(client voidptr) ?structs.UserInfo {
+	get_me(client)
+	raw := wait_for(client, 2.0, 'user', 50) or { return none }
+	return json.decode(structs.UserInfo, raw) or { return none }
+}
+
+pub fn fetch_invite_link_info(client voidptr, invite_link string) ?string {
+	q := '{"@type":"getChatInviteLinkInfo","invite_link":"${escape(invite_link)}"}'
+	tdlib.send_query(client, q)
+	return wait_for(client, 2.0, 'chatInviteLinkInfo', 50)
+}
+
+pub fn fetch_chat_members_search(client voidptr, chat_id i64, query string, limit int) []structs.ChatMember {
+	q := '{"@type":"searchChatMembers","chat_id":${chat_id},"query":"${escape(query)}","limit":${limit},"filter":{"@type":"chatMembersFilterMembers"}}'
+	tdlib.send_query(client, q)
+	raw := wait_for(client, 2.0, 'chatMembers', 50) or { return [] }
+	return parse_members(raw)
+}
+
+pub fn fetch_sticker_set(client voidptr, name string) ?string {
+	q := '{"@type":"getStickerSet","name":"${escape(name)}"}'
+	tdlib.send_query(client, q)
+	return wait_for(client, 2.0, 'stickerSet', 50)
+}
+
+pub fn fetch_contacts(client voidptr) ?string {
+	get_contacts(client)
+	return wait_for(client, 2.0, 'users', 50)
+}
