@@ -5,7 +5,13 @@ import tdlib
 import structs
 
 fn escape(s string) string {
-	return s.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n').replace('\t', '\\t')
+	return s.replace('\\', '\\\\')
+		.replace('"', '\\"')
+		.replace('\n', '\\n')
+		.replace('\r', '\\r')
+		.replace('\t', '\\t')
+		.replace('\b', '\\b')
+		.replace('\f', '\\f')
 }
 
 fn utf16_len(s string) int {
@@ -37,9 +43,7 @@ fn build_entities(entities []structs.TextEntityInput) string {
 	return '[${parts.join(",")}]'
 }
 
-pub fn parse(raw string) ?structs.TextMessage {
-	update := json.decode(structs.UpdateNewMessage, raw) or { return none }
-	msg := update.message
+fn to_text_message(msg structs.Message) ?structs.TextMessage {
 	if msg.content.@type != 'messageText' {
 		return none
 	}
@@ -68,74 +72,27 @@ pub fn parse(raw string) ?structs.TextMessage {
 		entities: text_data.entities
 		reply_to_id: reply_id
 	}
+}
+
+pub fn parse(raw string) ?structs.TextMessage {
+	update := json.decode(structs.UpdateNewMessage, raw) or { return none }
+	return to_text_message(update.message)
+}
+
+pub fn parse_single(raw string) ?structs.TextMessage {
+	msg := json.decode(structs.Message, raw) or { return none }
+	return to_text_message(msg)
 }
 
 pub fn parse_response(raw string) []structs.TextMessage {
 	resp := json.decode(structs.MessagesResponse, raw) or { return [] }
 	mut result := []structs.TextMessage{}
 	for msg in resp.messages {
-		if msg.content.@type != 'messageText' {
-			continue
-		}
-		text_data := msg.content.text or { continue }
-		mut sender_type := ''
-		mut sender_id := i64(0)
-		if msg.sender_id.@type == 'messageSenderUser' {
-			sender_type = 'user'
-			sender_id = msg.sender_id.user_id
-		} else if msg.sender_id.@type == 'messageSenderChat' {
-			sender_type = 'chat'
-			sender_id = msg.sender_id.chat_id
-		}
-		mut reply_id := i64(0)
-		if reply := msg.reply_to {
-			reply_id = reply.message_id
-		}
-		result << structs.TextMessage{
-			id: msg.id
-			chat_id: msg.chat_id
-			sender_type: sender_type
-			sender_id: sender_id
-			is_outgoing: msg.is_outgoing
-			date: msg.date
-			text: text_data.text
-			entities: text_data.entities
-			reply_to_id: reply_id
+		if t_msg := to_text_message(msg) {
+			result << t_msg
 		}
 	}
 	return result
-}
-
-pub fn parse_single(raw string) ?structs.TextMessage {
-	msg := json.decode(structs.Message, raw) or { return none }
-	if msg.content.@type != 'messageText' {
-		return none
-	}
-	text_data := msg.content.text or { return none }
-	mut sender_type := ''
-	mut sender_id := i64(0)
-	if msg.sender_id.@type == 'messageSenderUser' {
-		sender_type = 'user'
-		sender_id = msg.sender_id.user_id
-	} else if msg.sender_id.@type == 'messageSenderChat' {
-		sender_type = 'chat'
-		sender_id = msg.sender_id.chat_id
-	}
-	mut reply_id := i64(0)
-	if reply := msg.reply_to {
-		reply_id = reply.message_id
-	}
-	return structs.TextMessage{
-		id: msg.id
-		chat_id: msg.chat_id
-		sender_type: sender_type
-		sender_id: sender_id
-		is_outgoing: msg.is_outgoing
-		date: msg.date
-		text: text_data.text
-		entities: text_data.entities
-		reply_to_id: reply_id
-	}
 }
 
 pub fn parse_chat(raw string) ?structs.ChatInfo {
@@ -146,63 +103,52 @@ pub fn parse_link(raw string) ?structs.MessageLinkResponse {
 	return json.decode(structs.MessageLinkResponse, raw) or { return none }
 }
 
+fn send_with_single_entity(client voidptr, chat_id i64, text string, entity_type string, extra_attrs string) {
+	l := utf16_len(text)
+	extra := if extra_attrs.len > 0 { ',${extra_attrs}' } else { '' }
+	q := '{"@type":"sendMessage","chat_id":${chat_id},"input_message_content":{"@type":"inputMessageText","text":{"@type":"formattedText","text":"${escape(text)}","entities":[{"@type":"textEntity","offset":0,"length":${l},"type":{"@type":"${entity_type}"${extra}}}]}}}'
+	tdlib.send_query(client, q)
+}
+
 pub fn send(client voidptr, chat_id i64, text string) {
 	q := '{"@type":"sendMessage","chat_id":${chat_id},"input_message_content":{"@type":"inputMessageText","text":{"@type":"formattedText","text":"${escape(text)}"}}}'
 	tdlib.send_query(client, q)
 }
 
 pub fn send_bold(client voidptr, chat_id i64, text string) {
-	l := utf16_len(text)
-	q := '{"@type":"sendMessage","chat_id":${chat_id},"input_message_content":{"@type":"inputMessageText","text":{"@type":"formattedText","text":"${escape(text)}","entities":[{"@type":"textEntity","offset":0,"length":${l},"type":{"@type":"textEntityTypeBold"}}]}}}'
-	tdlib.send_query(client, q)
+	send_with_single_entity(client, chat_id, text, 'textEntityTypeBold', '')
 }
 
 pub fn send_italic(client voidptr, chat_id i64, text string) {
-	l := utf16_len(text)
-	q := '{"@type":"sendMessage","chat_id":${chat_id},"input_message_content":{"@type":"inputMessageText","text":{"@type":"formattedText","text":"${escape(text)}","entities":[{"@type":"textEntity","offset":0,"length":${l},"type":{"@type":"textEntityTypeItalic"}}]}}}'
-	tdlib.send_query(client, q)
+	send_with_single_entity(client, chat_id, text, 'textEntityTypeItalic', '')
 }
 
 pub fn send_underline(client voidptr, chat_id i64, text string) {
-	l := utf16_len(text)
-	q := '{"@type":"sendMessage","chat_id":${chat_id},"input_message_content":{"@type":"inputMessageText","text":{"@type":"formattedText","text":"${escape(text)}","entities":[{"@type":"textEntity","offset":0,"length":${l},"type":{"@type":"textEntityTypeUnderline"}}]}}}'
-	tdlib.send_query(client, q)
+	send_with_single_entity(client, chat_id, text, 'textEntityTypeUnderline', '')
 }
 
 pub fn send_strike(client voidptr, chat_id i64, text string) {
-	l := utf16_len(text)
-	q := '{"@type":"sendMessage","chat_id":${chat_id},"input_message_content":{"@type":"inputMessageText","text":{"@type":"formattedText","text":"${escape(text)}","entities":[{"@type":"textEntity","offset":0,"length":${l},"type":{"@type":"textEntityTypeStrikethrough"}}]}}}'
-	tdlib.send_query(client, q)
+	send_with_single_entity(client, chat_id, text, 'textEntityTypeStrikethrough', '')
 }
 
 pub fn send_code(client voidptr, chat_id i64, text string) {
-	l := utf16_len(text)
-	q := '{"@type":"sendMessage","chat_id":${chat_id},"input_message_content":{"@type":"inputMessageText","text":{"@type":"formattedText","text":"${escape(text)}","entities":[{"@type":"textEntity","offset":0,"length":${l},"type":{"@type":"textEntityTypeCode"}}]}}}'
-	tdlib.send_query(client, q)
+	send_with_single_entity(client, chat_id, text, 'textEntityTypeCode', '')
 }
 
 pub fn send_code_block(client voidptr, chat_id i64, text string, language string) {
-	l := utf16_len(text)
-	q := '{"@type":"sendMessage","chat_id":${chat_id},"input_message_content":{"@type":"inputMessageText","text":{"@type":"formattedText","text":"${escape(text)}","entities":[{"@type":"textEntity","offset":0,"length":${l},"type":{"@type":"textEntityTypePre","language":"${escape(language)}"}}]}}}'
-	tdlib.send_query(client, q)
+	send_with_single_entity(client, chat_id, text, 'textEntityTypePre', '"language":"${escape(language)}"')
 }
 
 pub fn send_spoiler(client voidptr, chat_id i64, text string) {
-	l := utf16_len(text)
-	q := '{"@type":"sendMessage","chat_id":${chat_id},"input_message_content":{"@type":"inputMessageText","text":{"@type":"formattedText","text":"${escape(text)}","entities":[{"@type":"textEntity","offset":0,"length":${l},"type":{"@type":"textEntityTypeSpoiler"}}]}}}'
-	tdlib.send_query(client, q)
+	send_with_single_entity(client, chat_id, text, 'textEntityTypeSpoiler', '')
 }
 
 pub fn send_quote(client voidptr, chat_id i64, text string) {
-	l := utf16_len(text)
-	q := '{"@type":"sendMessage","chat_id":${chat_id},"input_message_content":{"@type":"inputMessageText","text":{"@type":"formattedText","text":"${escape(text)}","entities":[{"@type":"textEntity","offset":0,"length":${l},"type":{"@type":"textEntityTypeBlockQuote"}}]}}}'
-	tdlib.send_query(client, q)
+	send_with_single_entity(client, chat_id, text, 'textEntityTypeBlockQuote', '')
 }
 
 pub fn send_link_text(client voidptr, chat_id i64, text string, url string) {
-	l := utf16_len(text)
-	q := '{"@type":"sendMessage","chat_id":${chat_id},"input_message_content":{"@type":"inputMessageText","text":{"@type":"formattedText","text":"${escape(text)}","entities":[{"@type":"textEntity","offset":0,"length":${l},"type":{"@type":"textEntityTypeTextUrl","url":"${escape(url)}"}}]}}}'
-	tdlib.send_query(client, q)
+	send_with_single_entity(client, chat_id, text, 'textEntityTypeTextUrl', '"url":"${escape(url)}"')
 }
 
 pub fn send_formatted(client voidptr, chat_id i64, text string, entities []structs.TextEntityInput) {
@@ -228,6 +174,46 @@ pub fn send_once_online(client voidptr, chat_id i64, text string) {
 
 pub fn send_no_preview(client voidptr, chat_id i64, text string) {
 	q := '{"@type":"sendMessage","chat_id":${chat_id},"input_message_content":{"@type":"inputMessageText","text":{"@type":"formattedText","text":"${escape(text)}"},"link_preview_options":{"@type":"linkPreviewOptions","is_disabled":true}}}'
+	tdlib.send_query(client, q)
+}
+
+pub fn send_photo(client voidptr, chat_id i64, file_path string, caption string) {
+	q := '{"@type":"sendMessage","chat_id":${chat_id},"input_message_content":{"@type":"inputMessagePhoto","photo":{"@type":"inputFileLocal","path":"${escape(file_path)}"},"caption":{"@type":"formattedText","text":"${escape(caption)}"}}}'
+	tdlib.send_query(client, q)
+}
+
+pub fn send_document(client voidptr, chat_id i64, file_path string, caption string) {
+	q := '{"@type":"sendMessage","chat_id":${chat_id},"input_message_content":{"@type":"inputMessageDocument","document":{"@type":"inputFileLocal","path":"${escape(file_path)}"},"caption":{"@type":"formattedText","text":"${escape(caption)}"}}}'
+	tdlib.send_query(client, q)
+}
+
+pub fn send_voice(client voidptr, chat_id i64, file_path string, duration int, caption string) {
+	q := '{"@type":"sendMessage","chat_id":${chat_id},"input_message_content":{"@type":"inputMessageVoice","voice":{"@type":"inputFileLocal","path":"${escape(file_path)}"},"duration":${duration},"caption":{"@type":"formattedText","text":"${escape(caption)}"}}}'
+	tdlib.send_query(client, q)
+}
+
+pub fn send_video(client voidptr, chat_id i64, file_path string, caption string) {
+	q := '{"@type":"sendMessage","chat_id":${chat_id},"input_message_content":{"@type":"inputMessageVideo","video":{"@type":"inputFileLocal","path":"${escape(file_path)}"},"caption":{"@type":"formattedText","text":"${escape(caption)}"}}}'
+	tdlib.send_query(client, q)
+}
+
+pub fn send_sticker(client voidptr, chat_id i64, file_path string) {
+	q := '{"@type":"sendMessage","chat_id":${chat_id},"input_message_content":{"@type":"inputMessageSticker","sticker":{"@type":"inputFileLocal","path":"${escape(file_path)}"}}}'
+	tdlib.send_query(client, q)
+}
+
+pub fn send_location(client voidptr, chat_id i64, latitude f64, longitude f64) {
+	q := '{"@type":"sendMessage","chat_id":${chat_id},"input_message_content":{"@type":"inputMessageLocation","location":{"@type":"location","latitude":${latitude},"longitude":${longitude},"horizontal_accuracy":0.0}}}'
+	tdlib.send_query(client, q)
+}
+
+pub fn send_contact(client voidptr, chat_id i64, phone_number string, first_name string, last_name string) {
+	q := '{"@type":"sendMessage","chat_id":${chat_id},"input_message_content":{"@type":"inputMessageContact","contact":{"@type":"contact","phone_number":"${escape(phone_number)}","first_name":"${escape(first_name)}","last_name":"${escape(last_name)}"}}}'
+	tdlib.send_query(client, q)
+}
+
+pub fn send_venue(client voidptr, chat_id i64, latitude f64, longitude f64, title string, address string) {
+	q := '{"@type":"sendMessage","chat_id":${chat_id},"input_message_content":{"@type":"inputMessageVenue","venue":{"@type":"venue","location":{"@type":"location","latitude":${latitude},"longitude":${longitude},"horizontal_accuracy":0.0},"title":"${escape(title)}","address":"${escape(address)}","provider":"","id":""}}}'
 	tdlib.send_query(client, q)
 }
 
@@ -416,8 +402,7 @@ pub fn close_chat(client voidptr, chat_id i64) {
 }
 
 pub fn get(client voidptr, chat_id i64, message_id i64) {
-	real_id := message_id * 1048576
-	q := '{"@type":"getMessage","chat_id":${chat_id},"message_id":${real_id}}'
+	q := '{"@type":"getMessage","chat_id":${chat_id},"message_id":${message_id}}'
 	tdlib.send_query(client, q)
 }
 
@@ -427,8 +412,57 @@ pub fn get_raw(client voidptr, chat_id i64, raw_message_id i64) {
 }
 
 pub fn get_many(client voidptr, chat_id i64, message_ids []i64) {
-	ids := message_ids.map((it * 1048576).str()).join(',')
+	ids := message_ids.map(it.str()).join(',')
 	q := '{"@type":"getMessages","chat_id":${chat_id},"message_ids":[${ids}]}'
+	tdlib.send_query(client, q)
+}
+
+pub fn kick_member(client voidptr, chat_id i64, user_id i64) {
+	q := '{"@type":"setChatMemberStatus","chat_id":${chat_id},"member_id":{"@type":"messageSenderUser","user_id":${user_id}},"status":{"@type":"chatMemberStatusBanned","banned_until_date":0}}'
+	tdlib.send_query(client, q)
+}
+
+pub fn add_reaction(client voidptr, chat_id i64, message_id i64, emoji string) {
+	q := '{"@type":"addMessageReaction","chat_id":${chat_id},"message_id":${message_id},"reaction_type":{"@type":"reactionTypeEmoji","emoji":"${escape(emoji)}"},"is_big":false,"update_recent_reactions":true}'
+	tdlib.send_query(client, q)
+}
+
+pub fn remove_reaction(client voidptr, chat_id i64, message_id i64, emoji string) {
+	q := '{"@type":"removeMessageReaction","chat_id":${chat_id},"message_id":${message_id},"reaction_type":{"@type":"reactionTypeEmoji","emoji":"${escape(emoji)}"}}'
+	tdlib.send_query(client, q)
+}
+
+pub fn get_me(client voidptr) {
+	q := '{"@type":"getMe"}'
+	tdlib.send_query(client, q)
+}
+
+pub fn get_user(client voidptr, user_id i64) {
+	q := '{"@type":"getUser","user_id":${user_id}}'
+	tdlib.send_query(client, q)
+}
+
+pub fn join_by_username(client voidptr, username string) {
+	mut clean := username
+	if clean.starts_with('@') {
+		clean = clean[1..]
+	}
+	q := '{"@type":"searchPublicChat","username":"${escape(clean)}"}'
+	tdlib.send_query(client, q)
+}
+
+pub fn answer_callback_query(client voidptr, callback_query_id u64, text string, show_alert bool) {
+	q := '{"@type":"answerCallbackQuery","callback_query_id":${callback_query_id},"text":"${escape(text)}","show_alert":${show_alert}}'
+	tdlib.send_query(client, q)
+}
+
+pub fn download_file(client voidptr, file_id int, priority int) {
+	q := '{"@type":"downloadFile","file_id":${file_id},"priority":${priority},"offset":0,"limit":0,"synchronous":false}'
+	tdlib.send_query(client, q)
+}
+
+pub fn get_chat_member(client voidptr, chat_id i64, user_id i64) {
+	q := '{"@type":"getChatMember","chat_id":${chat_id},"member_id":{"@type":"messageSenderUser","user_id":${user_id}}}'
 	tdlib.send_query(client, q)
 }
 
